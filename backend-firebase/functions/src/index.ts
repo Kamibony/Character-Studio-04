@@ -1,9 +1,18 @@
 
-import * as express from "express";
+// FIX: Change express import to bring in types directly.
+import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import admin from "firebase-admin";
 import { GoogleGenAI, Modality, GenerateContentResponse } from "@google/genai";
-import { Buffer } from "buffer";
+
+// FIX: Extend Express Request type to include user object from auth middleware.
+declare global {
+    namespace Express {
+        interface Request {
+            user?: admin.auth.DecodedIdToken;
+        }
+    }
+}
 
 // --- Service Initialization (Lazy) ---
 // We initialize services to null. They will be populated on the first request.
@@ -44,8 +53,8 @@ const initializeServices = () => {
 // --- Middleware ---
 
 // Authentication and Service Initialization Middleware
-// Fix: Use express.Request, express.Response, and express.NextFunction types
-const authMiddleware = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+// FIX: Use Request, Response, and NextFunction types from express.
+const authMiddleware = async (req: Request, res: Response, next: NextFunction) => {
     const authorization = req.headers.authorization;
     if (!authorization || !authorization.startsWith('Bearer ')) {
         return res.status(403).json({ error: 'Unauthorized: No token provided.' });
@@ -64,7 +73,8 @@ const authMiddleware = async (req: express.Request, res: express.Response, next:
     const token = authorization.split('Bearer ')[1];
     try {
         const decodedToken = await admin.auth().verifyIdToken(token);
-        (req as any).user = decodedToken; // Add user info to the request object
+        // FIX: Use typed user property on request.
+        req.user = decodedToken; // Add user info to the request object
         next();
     } catch (error) {
         console.error("Error verifying auth token:", error);
@@ -80,8 +90,8 @@ app.use(cors({ origin: true }));
 app.use(express.json({ limit: '10mb' })); // Increase limit for base64 images
 
 // --- Health Check Endpoint (No Auth) ---
-// Fix: Use express.Request and express.Response types
-app.get("/healthz", (req: express.Request, res: express.Response) => {
+// FIX: Use Request and Response types from express.
+app.get("/healthz", (req: Request, res: Response) => {
     res.status(200).send("OK");
 });
 
@@ -91,9 +101,10 @@ app.use(authMiddleware);
 // --- API Endpoints ---
 
 // Get all characters for the logged-in user
-// Fix: Use express.Request and express.Response types
-app.post("/getCharacterLibrary", async (req: express.Request, res: express.Response) => {
-    const userId = (req as any).user.uid;
+// FIX: Use Request and Response types from express.
+app.post("/getCharacterLibrary", async (req: Request, res: Response) => {
+    // FIX: Use typed user property on request.
+    const userId = req.user!.uid;
     try {
         const snapshot = await db!.collection('characters').where('userId', '==', userId).orderBy('createdAt', 'desc').get();
         const characters = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -105,9 +116,10 @@ app.post("/getCharacterLibrary", async (req: express.Request, res: express.Respo
 });
 
 // Get a single character by its ID
-// Fix: Use express.Request and express.Response types
-app.post("/getCharacterById", async (req: express.Request, res: express.Response) => {
-    const userId = (req as any).user.uid;
+// FIX: Use Request and Response types from express.
+app.post("/getCharacterById", async (req: Request, res: Response) => {
+    // FIX: Use typed user property on request.
+    const userId = req.user!.uid;
     const { characterId } = req.body;
 
     if (!characterId) {
@@ -131,13 +143,14 @@ app.post("/getCharacterById", async (req: express.Request, res: express.Response
 });
 
 // Create a new character pair profile
-// Fix: Use express.Request and express.Response types
-app.post("/createCharacterPair", async (req: express.Request, res: express.Response) => {
+// FIX: Use Request and Response types from express.
+app.post("/createCharacterPair", async (req: Request, res: Response) => {
     if (!ai) {
         return res.status(503).json({ error: 'AI service is not available. Check server configuration.' });
     }
     
-    const userId = (req as any).user.uid;
+    // FIX: Use typed user property on request.
+    const userId = req.user!.uid;
     const { charABase64, charAMimeType, charBBase64, charBMimeType } = req.body;
 
     if (!charABase64 || !charAMimeType || !charBBase64 || !charBMimeType) {
@@ -213,8 +226,8 @@ app.post("/createCharacterPair", async (req: express.Request, res: express.Respo
 
 
 // Generate a visualization for a character
-// Fix: Use express.Request and express.Response types
-app.post("/generateCharacterVisualization", async (req: express.Request, res: express.Response) => {
+// FIX: Use Request and Response types from express.
+app.post("/generateCharacterVisualization", async (req: Request, res: Response) => {
     if (!ai) {
         return res.status(503).json({ error: 'AI service is not available. Check server configuration.' });
     }
@@ -230,6 +243,12 @@ app.post("/generateCharacterVisualization", async (req: express.Request, res: ex
             return res.status(404).json({ error: "Character not found." });
         }
         const character = doc.data() as any;
+
+        // FIX: Add security check to ensure user owns the character.
+        const userId = req.user!.uid;
+        if (character?.userId !== userId) {
+            return res.status(403).json({ error: 'Permission denied.' });
+        }
 
         // Combine character data with user prompt for a richer generation context
         const fullPrompt = `
