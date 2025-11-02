@@ -1,10 +1,18 @@
 
-import express = require("express");
-import * as cors from "cors";
-import * as admin from "firebase-admin";
-import {GoogleGenAI, Type, Modality} from "@google/genai";
-// Fix for Buffer not being defined in the environment.
-import { Buffer } from "buffer";
+
+
+// FIX: Changed import to use default export of express and also import specific types to avoid type conflicts with global Request/Response types.
+import express, { Request, Response, NextFunction } from "express";
+import cors from "cors";
+import admin from "firebase-admin";
+import { GoogleGenAI, Type, Modality, GenerateContentResponse } from "@google/genai";
+
+// Define an interface for requests that have been authenticated
+// This extends the default Express Request to include our user property
+// FIX: Explicitly extend Request from express to avoid type conflicts.
+interface AuthenticatedRequest extends Request {
+  user?: admin.auth.DecodedIdToken;
+}
 
 // --- Main Application Startup ---
 try {
@@ -19,8 +27,8 @@ try {
     const storage = admin.storage();
 
     console.log("Checking for API_KEY...");
-    const ai = process.env.API_KEY ? new GoogleGenAI({apiKey: process.env.API_KEY}) : null;
-    
+    const ai = process.env.API_KEY ? new GoogleGenAI({ apiKey: process.env.API_KEY }) : null;
+
     if (!ai) {
         console.error("WARNING: API_KEY environment variable is not set. AI functions will be disabled.");
     } else {
@@ -28,18 +36,16 @@ try {
     }
 
     const app = express();
-    // FIX: Ensure port is a number for app.listen.
     const port = Number(process.env.PORT) || 8080;
     console.log(`Configuring server for port: ${port}`);
 
     // --- Middleware ---
     app.use(cors({ origin: true }));
-    // Increase payload size limit for base64 image uploads
     app.use(express.json({ limit: '10mb' }));
 
     // Auth middleware to verify Firebase ID tokens
-    // FIX: Changed express types to `any` to resolve type errors after fixing the express import.
-    const authMiddleware = async (req: any, res: any, next: any) => {
+    // FIX: Use explicit Request, Response, and NextFunction types from express to ensure correct type resolution.
+    const authMiddleware = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
         const { authorization } = req.headers;
         if (!authorization || !authorization.startsWith('Bearer ')) {
             return res.status(401).send({ error: 'Unauthorized: No token provided.' });
@@ -65,18 +71,20 @@ try {
 
     // Interface for character data
     interface UserCharacter {
-    id?: string;
-    userId: string;
-    characterName: string;
-    description: string;
-    keywords: string[];
-    imageUrl: string;
-    createdAt: admin.firestore.FieldValue | admin.firestore.Timestamp;
+        id?: string;
+        userId: string;
+        characterName: string;
+        description: string;
+        keywords: string[];
+        imageUrl: string;
+        createdAt: admin.firestore.FieldValue | admin.firestore.Timestamp;
     }
 
     // --- API Endpoints ---
 
-    app.post("/getCharacterLibrary", authMiddleware, async (req: any, res) => {
+    // FIX: Use explicit Response type from express for handler.
+    app.post("/getCharacterLibrary", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+        if (!req.user) return res.status(403).json({ error: "Authentication details are missing." });
         const uid = req.user.uid;
         try {
             const snapshot = await firestore
@@ -94,10 +102,12 @@ try {
         }
     });
 
-    app.post("/getCharacterById", authMiddleware, async (req: any, res) => {
+    // FIX: Use explicit Response type from express for handler.
+    app.post("/getCharacterById", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+        if (!req.user) return res.status(403).json({ error: "Authentication details are missing." });
         const uid = req.user.uid;
         const { characterId } = req.body;
-        
+
         if (!characterId) {
             return res.status(400).json({ error: "Missing 'characterId'." });
         }
@@ -131,67 +141,71 @@ try {
         const file = storage.bucket().file(filePath);
 
         await file.save(buffer, {
-        metadata: {contentType: mimeType},
+            metadata: { contentType: mimeType },
         });
         const [imageUrl] = await file.getSignedUrl({
-        action: "read",
-        expires: "03-09-2491",
+            action: "read",
+            expires: "03-09-2491",
         });
 
-        const response = await localAi.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: {
-            parts: [{
-            inlineData: {
-                data: base64,
-                mimeType: mimeType,
+        const response: GenerateContentResponse = await localAi.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: {
+                parts: [{
+                    inlineData: {
+                        data: base64,
+                        mimeType: mimeType,
+                    },
+                },
+                {
+                    text: "Analyze this character image. Provide a creative name, a brief 2-3 sentence description, and 5 keywords that describe their appearance or mood.",
+                },
+                ],
             },
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        characterName: { type: Type.STRING },
+                        description: { type: Type.STRING },
+                        keywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    },
+                    required: ["characterName", "description", "keywords"],
+                },
             },
-            {
-            text: "Analyze this character image. Provide a creative name, a brief 2-3 sentence description, and 5 keywords that describe their appearance or mood.",
-            },
-            ],
-        },
-        config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-                characterName: {type: Type.STRING},
-                description: {type: Type.STRING},
-                keywords: {type: Type.ARRAY, items: {type: Type.STRING}},
-            },
-            required: ["characterName", "description", "keywords"],
-            },
-        },
         });
 
+        if (!response.text) {
+          throw new Error("AI analysis returned an empty response.");
+        }
         const analysis = JSON.parse(response.text);
-        
+
         const newCharacter: UserCharacter = {
-        userId: uid,
-        characterName: analysis.characterName,
-        description: analysis.description,
-        keywords: analysis.keywords,
-        imageUrl: imageUrl,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            userId: uid,
+            characterName: analysis.characterName,
+            description: analysis.description,
+            keywords: analysis.keywords,
+            imageUrl: imageUrl,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
         };
 
         await firestore
-        .collection("user_characters")
-        .doc(characterId)
-        .set(newCharacter);
-        
-        // Fetch the created doc to return the server-generated timestamp
+            .collection("user_characters")
+            .doc(characterId)
+            .set(newCharacter);
+
         const docSnap = await firestore.collection("user_characters").doc(characterId).get();
         const createdData = docSnap.data() as UserCharacter;
 
-        return {...createdData, id: characterId};
+        return { ...createdData, id: characterId };
     };
 
-    app.post("/createCharacterPair", authMiddleware, async (req: any, res) => {
+    // FIX: Use explicit Response type from express for handler.
+    app.post("/createCharacterPair", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+        if (!req.user) return res.status(403).json({ error: "Authentication details are missing." });
         const uid = req.user.uid;
-        const {charABase64, charAMimeType, charBBase64, charBMimeType} = req.body;
+        const { charABase64, charAMimeType, charBBase64, charBMimeType } = req.body;
 
         if (!charABase64 || !charBBase64 || !charAMimeType || !charBMimeType) {
             return res.status(400).json({ error: "Missing image data." });
@@ -202,22 +216,24 @@ try {
                 analyzeAndSaveCharacter(charABase64, charAMimeType, uid),
                 analyzeAndSaveCharacter(charBBase64, charBMimeType, uid),
             ]);
-            res.status(200).json({characterA: charA, characterB: charB});
+            res.status(200).json({ characterA: charA, characterB: charB });
         } catch (error: any) {
             console.error("Error in createCharacterPair:", error);
             res.status(500).json({ error: "Internal server error.", details: error.message });
         }
     });
 
-    app.post("/generateCharacterVisualization", authMiddleware, async (req: any, res) => {
+    // FIX: Use explicit Response type from express for handler.
+    app.post("/generateCharacterVisualization", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+        if (!req.user) return res.status(403).json({ error: "Authentication details are missing." });
         const localAi = getAi();
         const uid = req.user.uid;
-        const {characterId, prompt} = req.body;
+        const { characterId, prompt } = req.body;
 
         if (!characterId || !prompt) {
             return res.status(400).json({ error: "Missing character ID or prompt." });
         }
-        
+
         try {
             const charDoc = await firestore
                 .collection("user_characters")
@@ -227,7 +243,7 @@ try {
                 return res.status(404).json({ error: "Character not found or access denied." });
             }
             const character = charDoc.data();
-            
+
             if (!character?.imageUrl) {
                 return res.status(404).json({ error: "Character image URL is missing." });
             }
@@ -236,19 +252,19 @@ try {
             const url = new URL(imageUrl);
             const filePath = decodeURIComponent(url.pathname.split("/").slice(2).join("/"));
             const file = storage.bucket().file(filePath);
-            
+
             const [metadata] = await file.getMetadata();
             const mimeType = metadata.contentType || "image/jpeg";
 
             const [imageBuffer] = await file.download();
             const imageBase64 = imageBuffer.toString("base64");
 
-            const response = await localAi.models.generateContent({
+            const response: GenerateContentResponse = await localAi.models.generateContent({
                 model: "gemini-2.5-flash-image",
                 contents: {
                     parts: [
-                        {inlineData: {data: imageBase64, mimeType: mimeType}},
-                        {text: `Using this character as a reference, create a new image based on the following prompt: "${prompt}"`},
+                        { inlineData: { data: imageBase64, mimeType: mimeType } },
+                        { text: `Using this character as a reference, create a new image based on the following prompt: "${prompt}"` },
                     ],
                 },
                 config: {
@@ -256,9 +272,10 @@ try {
                 },
             });
 
-            const generatedPart = response.candidates?.[0]?.content.parts[0];
-            if (generatedPart && generatedPart.inlineData) {
-                res.status(200).json({imageBase64: generatedPart.inlineData.data});
+            // Robust check for the generated image data
+            const generatedPart = response.candidates?.[0]?.content?.parts?.[0];
+            if (generatedPart && generatedPart.inlineData?.data) {
+                res.status(200).json({ imageBase64: generatedPart.inlineData.data });
             } else {
                 throw new Error("No image data returned from AI model.");
             }
@@ -275,6 +292,5 @@ try {
 
 } catch (error) {
     console.error("CRITICAL: A fatal error occurred during application startup.", error);
-    // Fix for property 'exit' does not exist on type 'Process'.
     (process as any).exit(1);
 }
