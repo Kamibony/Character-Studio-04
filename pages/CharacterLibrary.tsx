@@ -25,11 +25,7 @@ const CharacterLibrary: React.FC = () => {
       setCharacters(sortedCharacters);
     } catch (err: any) {
       console.error(err);
-      if (err.message && err.message.toLowerCase().includes('internal')) {
-        setError("Failed to load library due to a server error. This might be caused by a missing database index. Please check your Firebase function logs for a link to create the required index.");
-      } else {
-        setError(err.message || 'Failed to fetch character library.');
-      }
+      setError(err.message || 'Failed to fetch character library.');
     } finally {
       setLoading(false);
     }

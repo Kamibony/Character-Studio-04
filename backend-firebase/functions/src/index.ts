@@ -84,6 +84,46 @@ export const getCharacterLibrary = functions
     }
   });
 
+export const getCharacterById = functions
+  .region("us-central1")
+  .https.onCall(async (data, context) => {
+    initialize();
+    const uid = requireAuth(context);
+    const {characterId} = data;
+
+    if (!characterId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "The function must be called with a 'characterId'."
+      );
+    }
+
+    try {
+      const doc = await firestore
+        .collection("user_characters")
+        .doc(characterId)
+        .get();
+
+      if (!doc.exists || doc.data()?.userId !== uid) {
+        throw new functions.https.HttpsError(
+          "not-found",
+          "Character not found or you do not have permission to access it."
+        );
+      }
+
+      return {id: doc.id, ...doc.data()};
+    } catch (error) {
+      functions.logger.error("Error fetching character by ID:", {uid, characterId, error});
+      if (error instanceof functions.https.HttpsError) {
+        throw error;
+      }
+      throw new functions.https.HttpsError(
+        "internal",
+        "Unable to retrieve character."
+      );
+    }
+  });
+
 
 export const createCharacterPair = functions
   .region("us-central1")

@@ -1,16 +1,48 @@
-
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { signInWithPopup, User } from 'firebase/auth';
+import { signInWithRedirect, getRedirectResult } from 'firebase/auth';
 import { auth, googleProvider } from '../services/firebase';
 import ErrorDisplay from '../components/ErrorDisplay';
 import { useAuth } from '../hooks/useAuth';
+import Loader from '../components/Loader';
 
 const Login: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
-  const [unauthorizedDomain, setUnauthorizedDomain] = useState<boolean>(false);
+  const [unauthorizedDomainInfo, setUnauthorizedDomainInfo] = useState<{show: boolean; domain: string}>({show: false, domain: ''});
+  const [copied, setCopied] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(true); // Start as true to handle initial redirect check
   const navigate = useNavigate();
   const { user, loading } = useAuth();
+
+  useEffect(() => {
+    const processRedirect = async () => {
+      try {
+        const result = await getRedirectResult(auth);
+        if (result) {
+          // User successfully signed in.
+          navigate('/');
+        }
+      } catch (err: any) {
+        // Handle errors from the redirect
+         if (err.code === 'auth/unauthorized-domain') {
+          const detectedDomain = window.location.hostname || 'aistudio.google.com';
+          setUnauthorizedDomainInfo({show: true, domain: detectedDomain});
+        } else {
+          console.error("Login error from redirect:", err);
+          setError(err.message || "An unexpected error occurred during sign-in.");
+        }
+      } finally {
+        setIsProcessing(false); // Finished processing, show login UI
+      }
+    };
+    
+    // Only process redirect if the main auth state isn't loading and no user is found yet
+    if (!loading && !user) {
+        processRedirect();
+    } else {
+        setIsProcessing(false);
+    }
+  }, [navigate, user, loading]);
   
   if (!loading && user) {
       navigate('/');
@@ -19,51 +51,67 @@ const Login: React.FC = () => {
 
   const handleLogin = async () => {
     setError(null);
-    setUnauthorizedDomain(false);
-    try {
-      await signInWithPopup(auth, googleProvider);
-      navigate('/');
-    } catch (err: any) {
-      if (err.code === 'auth/unauthorized-domain') {
-        setUnauthorizedDomain(true);
-      } else {
-        console.error("Login error:", err);
-        setError(err.message || "An unexpected error occurred.");
-      }
+    setUnauthorizedDomainInfo({show: false, domain: ''});
+    setCopied(false);
+    setIsProcessing(true); // Show loader while redirecting
+    await signInWithRedirect(auth, googleProvider); // This will navigate away
+  };
+
+  const handleCopy = () => {
+    if(unauthorizedDomainInfo.domain){
+        navigator.clipboard.writeText(unauthorizedDomainInfo.domain);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000); // Reset after 2 seconds
     }
   };
 
-  const UnauthorizedDomainError = () => (
+  const UnauthorizedDomainError: React.FC<{domain: string}> = ({domain}) => (
     <ErrorDisplay
       title="Unauthorized Domain"
       message={
         <div className="text-sm">
-          <p>This domain is not authorized to use Firebase Authentication.</p>
-          <p className="mt-2">To fix this, please follow these steps:</p>
-          <ol className="list-decimal list-inside mt-2 space-y-1">
+          <p>This domain is not authorized for Firebase Authentication.</p>
+          <p className="mt-2">To fix this, please add the following domain to your project's settings:</p>
+          <ol className="list-decimal list-inside my-2 space-y-1">
             <li>
-              Go to your{' '}
+              Open your{' '}
               <a
                 href={`https://console.firebase.google.com/u/0/project/${auth.app.options.projectId}/authentication/settings`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-blue-400 hover:underline"
+                className="text-blue-400 hover:underline font-semibold"
               >
                 Firebase Authentication Settings
               </a>.
             </li>
-            <li>Click on the "Authorized domains" tab.</li>
-            <li>Click "Add domain".</li>
-            <li>Copy and paste the following domain:</li>
+            <li>Go to the "Authorized domains" section.</li>
+            <li>Click "Add domain" and paste the value below.</li>
           </ol>
-          <pre className="bg-gray-800 text-pink-300 p-2 rounded-md mt-2 text-center select-all">
-            {window.location.hostname}
-          </pre>
+          <div className="relative bg-gray-800 p-3 rounded-md mt-2 flex items-center justify-between">
+            <code className="text-pink-300 select-all font-mono">
+              {domain}
+            </code>
+            <button 
+              onClick={handleCopy}
+              disabled={!domain}
+              className="bg-gray-700 hover:bg-gray-600 text-gray-200 font-bold py-1 px-3 rounded-md text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {copied ? 'Copied!' : 'Copy'}
+            </button>
+          </div>
         </div>
       }
     />
   );
-
+  
+  // While checking for redirect result or if the app is still loading auth state
+  if (loading || isProcessing) {
+      return (
+          <div className="flex items-center justify-center min-h-[calc(100vh-120px)]">
+              <Loader text="Authenticating..."/>
+          </div>
+      )
+  }
 
   return (
     <div className="flex items-center justify-center min-h-[calc(100vh-120px)]">
@@ -76,7 +124,7 @@ const Login: React.FC = () => {
         </div>
 
         {error && <ErrorDisplay title="Login Failed" message={error} />}
-        {unauthorizedDomain && <UnauthorizedDomainError />}
+        {unauthorizedDomainInfo.show && <UnauthorizedDomainError domain={unauthorizedDomainInfo.domain}/>}
         
         <button
           onClick={handleLogin}

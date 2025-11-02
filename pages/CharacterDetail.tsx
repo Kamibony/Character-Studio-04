@@ -1,13 +1,9 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { UserCharacter } from '../types';
-import { generateCharacterVisualization } from '../services/firebase';
+import { generateCharacterVisualization, getCharacterById } from '../services/firebase';
 import Loader from '../components/Loader';
 import ErrorDisplay from '../components/ErrorDisplay';
-// A simplified way to get a single doc; in a real app this would be a dedicated function.
-import { getCharacterLibrary } from '../services/firebase'; 
-
 
 const CharacterDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -23,20 +19,14 @@ const CharacterDetail: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await getCharacterLibrary();
-      const allChars = result.data as UserCharacter[];
-      const foundChar = allChars.find(c => c.id === id);
-      if (foundChar) {
-        setCharacter(foundChar);
-      } else {
-        setError('Character not found.');
-      }
+      const result = await getCharacterById({ characterId: id });
+      setCharacter(result.data as UserCharacter);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch character.');
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, getCharacterById]);
 
   useEffect(() => {
     fetchCharacter();

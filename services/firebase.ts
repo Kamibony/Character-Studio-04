@@ -1,6 +1,5 @@
-
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, browserLocalPersistence, setPersistence } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 
 const firebaseConfig = {
@@ -18,8 +17,17 @@ const auth = getAuth(app);
 const functions = getFunctions(app, 'us-central1');
 const googleProvider = new GoogleAuthProvider();
 
+// Explicitly set persistence to localStorage. This is more reliable in
+// restricted iframe environments that might block sessionStorage, which can
+// cause redirect-based sign-in flows to fail.
+setPersistence(auth, browserLocalPersistence)
+  .catch((error) => {
+    console.error("Firebase Persistence Error: Could not set persistence.", error);
+  });
+
 // Callable Functions
 const getCharacterLibrary = httpsCallable(functions, 'getCharacterLibrary');
+const getCharacterById = httpsCallable(functions, 'getCharacterById');
 const createCharacterPair = httpsCallable(functions, 'createCharacterPair');
 const generateCharacterVisualization = httpsCallable(functions, 'generateCharacterVisualization');
 
@@ -28,6 +36,7 @@ export {
   auth, 
   googleProvider,
   getCharacterLibrary,
+  getCharacterById,
   createCharacterPair,
   generateCharacterVisualization
 };
