@@ -4,10 +4,11 @@
   "main": "lib/index.js",
   "scripts": {
     "build": "tsc",
+    "prestart": "npm run build",
     "start": "node lib/index.js"
   },
   "engines": {
-    "node": "18"
+    "node": "20"
   },
   "dependencies": {
     "@google/genai": "^0.12.0",

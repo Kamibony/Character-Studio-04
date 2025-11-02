@@ -1,0 +1,22 @@
+# This file configures the backend for Firebase App Hosting.
+# For more information, see the documentation:
+# https://firebase.google.com/docs/hosting/app-hosting/apphosting-yaml
+
+# Specifies the location and configuration of your backend code.
+backend:
+  # The directory where your backend code (package.json, etc.) is located.
+  # App Hosting will run 'npm install' and 'npm run build' in this directory.
+  root: backend-firebase/functions
+
+  # The command to start your backend server after it's built.
+  # This should match the 'start' script in your package.json.
+  run: npm run start
+
+  # Defines environment variables available to your backend service.
+  env:
+    # This makes the API_KEY available as process.env.API_KEY in your Node.js code.
+    - variable: API_KEY
+      # This specifies that the value should be sourced from a secret
+      # managed in Google Cloud Secret Manager. You must create a secret
+      # with this name in your project's Secret Manager.
+      secret: gemini-api-key
