@@ -1,4 +1,3 @@
-
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {GoogleGenAI, Type, Modality} from "@google/genai";
@@ -19,16 +18,21 @@ interface UserCharacter {
 
 // Lazy initialization
 let app: admin.app.App;
-let ai: GoogleGenAI;
+let ai: GoogleGenAI | null = null;
 let firestore: admin.firestore.Firestore;
 let storage: admin.storage.Storage;
 
 const initialize = () => {
   if (!app) {
     app = admin.initializeApp();
-    ai = new GoogleGenAI({apiKey: process.env.API_KEY as string});
     firestore = admin.firestore();
     storage = admin.storage();
+    // Initialize AI if the key exists.
+    if (process.env.API_KEY) {
+      ai = new GoogleGenAI({apiKey: process.env.API_KEY});
+    } else {
+      functions.logger.error("FATAL: API_KEY environment variable is not set. AI functions will fail.");
+    }
   }
 };
 
@@ -41,6 +45,17 @@ const requireAuth = (context: functions.https.CallableContext) => {
   }
   return context.auth.uid;
 };
+
+// A helper to ensure AI is initialized before use
+const getAi = (): GoogleGenAI => {
+    if (!ai) {
+        throw new functions.https.HttpsError(
+            "failed-precondition",
+            "The Gemini API key is not configured for the backend. Please set the 'API_KEY' environment variable on your Cloud Function."
+        );
+    }
+    return ai;
+}
 
 export const getCharacterLibrary = functions
   .region("us-central1")
@@ -61,7 +76,7 @@ export const getCharacterLibrary = functions
 
       return characters;
     } catch (error) {
-      console.error("Error fetching character library:", error);
+      functions.logger.error("Error fetching character library:", {uid, error});
       throw new functions.https.HttpsError(
         "internal",
         "Unable to retrieve character library."
@@ -75,6 +90,7 @@ export const createCharacterPair = functions
   .runWith({timeoutSeconds: 300, memory: "1GB"})
   .https.onCall(async (data, context) => {
     initialize();
+    const localAi = getAi(); // Get AI instance, will throw if not configured
     const uid = requireAuth(context);
     const {charABase64, charAMimeType, charBBase64, charBMimeType} = data;
 
@@ -104,7 +120,7 @@ export const createCharacterPair = functions
       });
 
       // 2. Call Gemini to analyze image
-      const response = await ai.models.generateContent({
+      const response = await localAi.models.generateContent({
         // FIX: The model `gemini-1.5-flash` is deprecated. Use `gemini-2.5-flash` instead.
         model: "gemini-2.5-flash",
         contents: {
@@ -160,7 +176,10 @@ export const createCharacterPair = functions
       ]);
       return {characterA: charA, characterB: charB};
     } catch (error) {
-      console.error("Error creating character pair:", error);
+      functions.logger.error("Error creating character pair:", {uid, error});
+      if (error instanceof functions.https.HttpsError) {
+          throw error;
+      }
       throw new functions.https.HttpsError(
         "internal",
         "Failed to process and create characters."
@@ -174,6 +193,7 @@ export const generateCharacterVisualization = functions
   .runWith({timeoutSeconds: 300, memory: "1GB"})
   .https.onCall(async (data, context) => {
     initialize();
+    const localAi = getAi(); // Get AI instance, will throw if not configured
     const uid = requireAuth(context);
     const {characterId, prompt} = data;
 
@@ -196,9 +216,14 @@ export const generateCharacterVisualization = functions
       );
     }
     const character = charDoc.data();
+    
+    // This check is important
+    if (!character?.imageUrl) {
+         throw new functions.https.HttpsError("not-found", "Character image URL is missing.");
+    }
 
     // 2. Fetch image from storage url
-    const imageUrl = character?.imageUrl;
+    const imageUrl = character.imageUrl;
     const url = new URL(imageUrl);
     // FIX: Path from GCS signed URL needs to skip bucket name. `slice(2)` is correct.
     const filePath = decodeURIComponent(url.pathname.split("/").slice(2).join("/"));
@@ -213,7 +238,7 @@ export const generateCharacterVisualization = functions
 
     // 3. Call Gemini to generate new image
     try {
-      const response = await ai.models.generateContent({
+      const response = await localAi.models.generateContent({
         model: "gemini-2.5-flash-image",
         contents: {
           parts: [
@@ -234,7 +259,10 @@ export const generateCharacterVisualization = functions
         throw new Error("No image data returned from AI model.");
       }
     } catch (error) {
-      console.error("Error generating visualization:", error);
+      functions.logger.error("Error generating visualization:", {uid, characterId, error});
+      if (error instanceof functions.https.HttpsError) {
+          throw error;
+      }
       throw new functions.https.HttpsError(
         "internal",
         "Failed to generate visualization."
