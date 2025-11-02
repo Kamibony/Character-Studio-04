@@ -1,11 +1,11 @@
 {
   "name": "character-studio-functions",
   "version": "1.0.0",
-  "main": "lib/index.js",
+  "main": "index.js",
   "scripts": {
     "build": "tsc",
     "prestart": "npm run build",
-    "start": "node lib/index.js"
+    "start": "node index.js"
   },
   "engines": {
     "node": "20"

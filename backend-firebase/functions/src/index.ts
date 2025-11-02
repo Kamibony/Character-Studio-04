@@ -1,12 +1,12 @@
-// FIX: Using fully qualified Express types to avoid global type conflicts with DOM types.
-import express from "express";
+// FIX: Explicitly import Express types to avoid global type conflicts with DOM types.
+import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import admin from "firebase-admin";
 import { GoogleGenAI, Type, Modality, GenerateContentResponse } from "@google/genai";
 
 // Define an interface for requests that have been authenticated
-// FIX: Extend express.Request to ensure correct Express types are used.
-interface AuthenticatedRequest extends express.Request {
+// FIX: Extend Request from Express to ensure correct Express types are used.
+interface AuthenticatedRequest extends Request {
   user?: admin.auth.DecodedIdToken;
 }
 
@@ -67,8 +67,8 @@ try {
     app.use(express.json({ limit: '10mb' }));
 
     // Auth middleware now also handles service initialization
-    // FIX: Use fully qualified types for Express Response and NextFunction.
-    const authMiddleware = async (req: AuthenticatedRequest, res: express.Response, next: express.NextFunction) => {
+    // FIX: Use imported Express types for Response and NextFunction.
+    const authMiddleware = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
         initializeServices(); // Ensure services are initialized
         
         const { authorization } = req.headers;
@@ -111,8 +111,8 @@ try {
 
     // --- API Endpoints ---
 
-    // FIX: Use fully qualified type for Express Response.
-    app.post("/getCharacterLibrary", authMiddleware, async (req: AuthenticatedRequest, res: express.Response) => {
+    // FIX: Use imported Express type for Response.
+    app.post("/getCharacterLibrary", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
         if (!req.user) return res.status(403).json({ error: "Authentication details are missing." });
         const uid = req.user.uid;
         try {
@@ -131,8 +131,8 @@ try {
         }
     });
 
-    // FIX: Use fully qualified type for Express Response.
-    app.post("/getCharacterById", authMiddleware, async (req: AuthenticatedRequest, res: express.Response) => {
+    // FIX: Use imported Express type for Response.
+    app.post("/getCharacterById", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
         if (!req.user) return res.status(403).json({ error: "Authentication details are missing." });
         const uid = req.user.uid;
         const { characterId } = req.body;
@@ -230,8 +230,8 @@ try {
         return { ...createdData, id: characterId };
     };
 
-    // FIX: Use fully qualified type for Express Response.
-    app.post("/createCharacterPair", authMiddleware, async (req: AuthenticatedRequest, res: express.Response) => {
+    // FIX: Use imported Express type for Response.
+    app.post("/createCharacterPair", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
         if (!req.user) return res.status(403).json({ error: "Authentication details are missing." });
         const uid = req.user.uid;
         const { charABase64, charAMimeType, charBBase64, charBMimeType } = req.body;
@@ -252,8 +252,8 @@ try {
         }
     });
 
-    // FIX: Use fully qualified type for Express Response.
-    app.post("/generateCharacterVisualization", authMiddleware, async (req: AuthenticatedRequest, res: express.Response) => {
+    // FIX: Use imported Express type for Response.
+    app.post("/generateCharacterVisualization", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
         if (!req.user) return res.status(403).json({ error: "Authentication details are missing." });
         const localAi = getAi();
         const uid = req.user.uid;
