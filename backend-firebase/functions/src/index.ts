@@ -1,7 +1,5 @@
-
-
-
-// FIX: Changed import to use default export of express and also import specific types to avoid type conflicts with global Request/Response types.
+// FIX: Only import the default export from express to avoid global type conflicts with Request and Response.
+// Using named imports for Express types is a more robust way to avoid global type conflicts.
 import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import admin from "firebase-admin";
@@ -9,30 +7,38 @@ import { GoogleGenAI, Type, Modality, GenerateContentResponse } from "@google/ge
 
 // Define an interface for requests that have been authenticated
 // This extends the default Express Request to include our user property
-// FIX: Explicitly extend Request from express to avoid type conflicts.
+// FIX: Explicitly extend express.Request to avoid type conflicts.
 interface AuthenticatedRequest extends Request {
   user?: admin.auth.DecodedIdToken;
 }
 
+// --- Lazy Initializer for Firebase and other services ---
+let firestore: admin.firestore.Firestore;
+let storage: admin.storage.Storage;
+
+const initializeServices = () => {
+    if (admin.apps.length === 0) {
+        console.log("Initializing Firebase Admin SDK...");
+        admin.initializeApp({
+            projectId: process.env.GCLOUD_PROJECT,
+        });
+        firestore = admin.firestore();
+        storage = admin.storage();
+        console.log("Firebase Admin SDK initialized successfully.");
+    }
+};
+
+
 // --- Main Application Startup ---
 try {
-    console.log("Initializing application...");
+    console.log("Application starting up...");
 
-    // --- Global Initialization ---
-    console.log("Initializing Firebase Admin SDK...");
-    admin.initializeApp();
-    console.log("Firebase Admin SDK initialized successfully.");
-
-    const firestore = admin.firestore();
-    const storage = admin.storage();
-
-    console.log("Checking for API_KEY...");
     const ai = process.env.API_KEY ? new GoogleGenAI({ apiKey: process.env.API_KEY }) : null;
 
     if (!ai) {
         console.error("WARNING: API_KEY environment variable is not set. AI functions will be disabled.");
     } else {
-        console.log("Gemini AI client initialized.");
+        console.log("Gemini AI client configured.");
     }
 
     const app = express();
@@ -44,8 +50,9 @@ try {
     app.use(express.json({ limit: '10mb' }));
 
     // Auth middleware to verify Firebase ID tokens
-    // FIX: Use explicit Request, Response, and NextFunction types from express to ensure correct type resolution.
     const authMiddleware = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+        // Initialize services on first request if not already done
+        initializeServices(); 
         const { authorization } = req.headers;
         if (!authorization || !authorization.startsWith('Bearer ')) {
             return res.status(401).send({ error: 'Unauthorized: No token provided.' });
@@ -82,7 +89,6 @@ try {
 
     // --- API Endpoints ---
 
-    // FIX: Use explicit Response type from express for handler.
     app.post("/getCharacterLibrary", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
         if (!req.user) return res.status(403).json({ error: "Authentication details are missing." });
         const uid = req.user.uid;
@@ -102,7 +108,6 @@ try {
         }
     });
 
-    // FIX: Use explicit Response type from express for handler.
     app.post("/getCharacterById", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
         if (!req.user) return res.status(403).json({ error: "Authentication details are missing." });
         const uid = req.user.uid;
@@ -201,7 +206,6 @@ try {
         return { ...createdData, id: characterId };
     };
 
-    // FIX: Use explicit Response type from express for handler.
     app.post("/createCharacterPair", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
         if (!req.user) return res.status(403).json({ error: "Authentication details are missing." });
         const uid = req.user.uid;
@@ -223,7 +227,6 @@ try {
         }
     });
 
-    // FIX: Use explicit Response type from express for handler.
     app.post("/generateCharacterVisualization", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
         if (!req.user) return res.status(403).json({ error: "Authentication details are missing." });
         const localAi = getAi();
