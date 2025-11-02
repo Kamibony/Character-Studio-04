@@ -57,6 +57,25 @@ const getAi = (): GoogleGenAI => {
     return ai;
 }
 
+const handleGeneralError = (error: any, context: string) => {
+    functions.logger.error(`Error in ${context}:`, {
+        // Log the full error object for detailed inspection in Firebase logs
+        fullError: error,
+        errorMessage: error.message,
+        errorCode: error.code,
+        errorDetails: error.details,
+    });
+    if (error instanceof functions.https.HttpsError) {
+        throw error;
+    }
+    // Provide a more helpful, actionable error message to the client.
+    throw new functions.https.HttpsError(
+        "internal",
+        `An internal server error occurred in ${context}. This might be due to a Google Cloud configuration issue. Please check the function logs and ensure that project billing and all required APIs (like Vertex AI and Cloud Storage) are enabled.`,
+        { originalErrorMessage: error.message }
+    );
+};
+
 export const getCharacterLibrary = functions
   .region("us-central1")
   .https.onCall(async (data, context) => {
@@ -76,11 +95,10 @@ export const getCharacterLibrary = functions
 
       return characters;
     } catch (error) {
-      functions.logger.error("Error fetching character library:", {uid, error});
-      throw new functions.https.HttpsError(
-        "internal",
-        "Unable to retrieve character library."
-      );
+        handleGeneralError(error, "getCharacterLibrary");
+        // The line below will not be reached due to the throw in handleGeneralError,
+        // but it's here to satisfy TypeScript's requirement for a return value.
+        return [];
     }
   });
 
@@ -113,14 +131,8 @@ export const getCharacterById = functions
 
       return {id: doc.id, ...doc.data()};
     } catch (error) {
-      functions.logger.error("Error fetching character by ID:", {uid, characterId, error});
-      if (error instanceof functions.https.HttpsError) {
-        throw error;
-      }
-      throw new functions.https.HttpsError(
-        "internal",
-        "Unable to retrieve character."
-      );
+      handleGeneralError(error, "getCharacterById");
+      return null;
     }
   });
 
@@ -161,7 +173,6 @@ export const createCharacterPair = functions
 
       // 2. Call Gemini to analyze image
       const response = await localAi.models.generateContent({
-        // FIX: The model `gemini-1.5-flash` is deprecated. Use `gemini-2.5-flash` instead.
         model: "gemini-2.5-flash",
         contents: {
           parts: [{
@@ -216,14 +227,8 @@ export const createCharacterPair = functions
       ]);
       return {characterA: charA, characterB: charB};
     } catch (error) {
-      functions.logger.error("Error creating character pair:", {uid, error});
-      if (error instanceof functions.https.HttpsError) {
-          throw error;
-      }
-      throw new functions.https.HttpsError(
-        "internal",
-        "Failed to process and create characters."
-      );
+        handleGeneralError(error, "createCharacterPair");
+        return null;
     }
   });
 
@@ -265,11 +270,9 @@ export const generateCharacterVisualization = functions
     // 2. Fetch image from storage url
     const imageUrl = character.imageUrl;
     const url = new URL(imageUrl);
-    // FIX: Path from GCS signed URL needs to skip bucket name. `slice(2)` is correct.
     const filePath = decodeURIComponent(url.pathname.split("/").slice(2).join("/"));
     const file = storage.bucket().file(filePath);
-
-    // FIX: Dynamically get mimeType from metadata instead of hardcoding.
+    
     const [metadata] = await file.getMetadata();
     const mimeType = metadata.contentType || "image/jpeg";
 
@@ -282,7 +285,6 @@ export const generateCharacterVisualization = functions
         model: "gemini-2.5-flash-image",
         contents: {
           parts: [
-            // FIX: Use the dynamic mimeType.
             {inlineData: {data: imageBase64, mimeType: mimeType}},
             {text: `Using this character as a reference, create a new image based on the following prompt: "${prompt}"`},
           ],
@@ -299,13 +301,7 @@ export const generateCharacterVisualization = functions
         throw new Error("No image data returned from AI model.");
       }
     } catch (error) {
-      functions.logger.error("Error generating visualization:", {uid, characterId, error});
-      if (error instanceof functions.https.HttpsError) {
-          throw error;
-      }
-      throw new functions.https.HttpsError(
-        "internal",
-        "Failed to generate visualization."
-      );
+      handleGeneralError(error, "generateCharacterVisualization");
+      return null;
     }
   });
