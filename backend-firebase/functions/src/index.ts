@@ -1,5 +1,4 @@
-
-// FIX: Change express import to bring in types directly.
+// FIX: Combined express import to resolve type errors.
 import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import admin from "firebase-admin";
