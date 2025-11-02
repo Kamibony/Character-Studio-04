@@ -1,6 +1,5 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, browserLocalPersistence, setPersistence } from 'firebase/auth';
-import { getFunctions, httpsCallable } from 'firebase/functions';
 
 const firebaseConfig = {
   apiKey: "AIzaSyARuwcn4hMmt7MD5tTTp_r2HVqSu8Zno20",
@@ -14,29 +13,70 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const functions = getFunctions(app, 'europe-west4');
 const googleProvider = new GoogleAuthProvider();
 
-// Explicitly set persistence to localStorage. This is more reliable in
-// restricted iframe environments that might block sessionStorage, which can
-// cause redirect-based sign-in flows to fail.
+// Explicitly set persistence to localStorage.
 setPersistence(auth, browserLocalPersistence)
   .catch((error) => {
     console.error("Firebase Persistence Error: Could not set persistence.", error);
   });
 
-// Callable Functions
-const getCharacterLibrary = httpsCallable(functions, 'getCharacterLibrary');
-const getCharacterById = httpsCallable(functions, 'getCharacterById');
-const createCharacterPair = httpsCallable(functions, 'createCharacterPair');
-const generateCharacterVisualization = httpsCallable(functions, 'generateCharacterVisualization');
+// The backend URL will be relative, assuming App Hosting proxies it.
+const API_BASE_URL = ''; 
 
+const callApi = async (endpoint: string, body: object = {}) => {
+    const user = auth.currentUser;
+    if (!user) {
+        throw new Error("User not authenticated.");
+    }
+    
+    const token = await user.getIdToken();
+    const response = await fetch(`${API_BASE_URL}/${endpoint}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(body)
+    });
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'An unknown error occurred' }));
+        const error: any = new Error(errorData.error || response.statusText);
+        error.code = response.status;
+        throw error;
+    }
+    
+    return await response.json();
+}
+
+// Re-implement the callable function interfaces using our new fetch helper
+export const getCharacterLibrary = async () => {
+    const data = await callApi('getCharacterLibrary');
+    return { data }; // Wrap in `data` to match HttpsCallableResult
+};
+
+export const getCharacterById = async (requestData: { characterId: string }) => {
+    const data = await callApi('getCharacterById', requestData);
+    return { data };
+};
+
+export const createCharacterPair = async (requestData: {
+  charABase64: string,
+  charAMimeType: string,
+  charBBase64: string,
+  charBMimeType: string
+}) => {
+    const data = await callApi('createCharacterPair', requestData);
+    return { data };
+};
+
+export const generateCharacterVisualization = async (requestData: { characterId: string; prompt: string }) => {
+    const data = await callApi('generateCharacterVisualization', requestData);
+    return { data };
+};
 
 export { 
   auth, 
   googleProvider,
-  getCharacterLibrary,
-  getCharacterById,
-  createCharacterPair,
-  generateCharacterVisualization
 };
