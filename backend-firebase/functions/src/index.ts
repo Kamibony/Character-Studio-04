@@ -1,64 +1,86 @@
-// FIX: Only import the default export from express to avoid global type conflicts with Request and Response.
-// Using named imports for Express types is a more robust way to avoid global type conflicts.
-import express, { Request, Response, NextFunction } from "express";
+// FIX: Using fully qualified Express types to avoid global type conflicts with DOM types.
+import express from "express";
 import cors from "cors";
 import admin from "firebase-admin";
 import { GoogleGenAI, Type, Modality, GenerateContentResponse } from "@google/genai";
 
 // Define an interface for requests that have been authenticated
-// This extends the default Express Request to include our user property
-// FIX: Explicitly extend express.Request to avoid type conflicts.
-interface AuthenticatedRequest extends Request {
+// FIX: Extend express.Request to ensure correct Express types are used.
+interface AuthenticatedRequest extends express.Request {
   user?: admin.auth.DecodedIdToken;
 }
 
-// --- Lazy Initializer for Firebase and other services ---
+// --- Lazy Initializer for ALL external services ---
 let firestore: admin.firestore.Firestore;
 let storage: admin.storage.Storage;
+let ai: GoogleGenAI | null = null;
+let servicesInitialized = false;
 
 const initializeServices = () => {
-    if (admin.apps.length === 0) {
-        console.log("Initializing Firebase Admin SDK...");
+    // This function should only ever run once.
+    if (servicesInitialized) {
+        return;
+    }
+    console.log("First request received. Initializing external services...");
+    
+    // Initialize Firebase Admin SDK
+    try {
         admin.initializeApp({
             projectId: process.env.GCLOUD_PROJECT,
         });
         firestore = admin.firestore();
         storage = admin.storage();
         console.log("Firebase Admin SDK initialized successfully.");
+    } catch (error) {
+        console.error("CRITICAL: Firebase Admin SDK initialization failed.", error);
+        // Do not proceed if Firebase fails
+        return;
     }
+
+    // Initialize GoogleGenAI SDK
+    if (process.env.API_KEY) {
+        try {
+            ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            console.log("Gemini AI client configured successfully.");
+        } catch(error) {
+            console.error("CRITICAL: Gemini AI client initialization failed.", error);
+        }
+    } else {
+        console.error("WARNING: API_KEY environment variable is not set. AI functions will be disabled.");
+    }
+
+    servicesInitialized = true;
 };
 
 
 // --- Main Application Startup ---
 try {
-    console.log("Application starting up...");
-
-    const ai = process.env.API_KEY ? new GoogleGenAI({ apiKey: process.env.API_KEY }) : null;
-
-    if (!ai) {
-        console.error("WARNING: API_KEY environment variable is not set. AI functions will be disabled.");
-    } else {
-        console.log("Gemini AI client configured.");
-    }
+    console.log("Application starting up... External services will be initialized on first request.");
 
     const app = express();
     const port = Number(process.env.PORT) || 8080;
+    
     console.log(`Configuring server for port: ${port}`);
 
     // --- Middleware ---
     app.use(cors({ origin: true }));
     app.use(express.json({ limit: '10mb' }));
 
-    // Auth middleware to verify Firebase ID tokens
-    const authMiddleware = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-        // Initialize services on first request if not already done
-        initializeServices(); 
+    // Auth middleware now also handles service initialization
+    // FIX: Use fully qualified types for Express Response and NextFunction.
+    const authMiddleware = async (req: AuthenticatedRequest, res: express.Response, next: express.NextFunction) => {
+        initializeServices(); // Ensure services are initialized
+        
         const { authorization } = req.headers;
         if (!authorization || !authorization.startsWith('Bearer ')) {
             return res.status(401).send({ error: 'Unauthorized: No token provided.' });
         }
         const idToken = authorization.split('Bearer ')[1];
         try {
+            // Ensure admin has been initialized before calling auth()
+            if (!admin.apps.length) {
+                throw new Error("Firebase Admin SDK not available.");
+            }
             const decodedToken = await admin.auth().verifyIdToken(idToken);
             req.user = decodedToken; // Attach user info to the request object
             next();
@@ -68,10 +90,10 @@ try {
         }
     };
 
-    // Helper to ensure AI is initialized before use
+    // Helper to ensure AI is available before use
     const getAi = (): GoogleGenAI => {
         if (!ai) {
-            throw new Error("The Gemini API key is not configured for the backend.");
+            throw new Error("The Gemini API key is not configured or failed to initialize for the backend.");
         }
         return ai;
     }
@@ -89,7 +111,8 @@ try {
 
     // --- API Endpoints ---
 
-    app.post("/getCharacterLibrary", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    // FIX: Use fully qualified type for Express Response.
+    app.post("/getCharacterLibrary", authMiddleware, async (req: AuthenticatedRequest, res: express.Response) => {
         if (!req.user) return res.status(403).json({ error: "Authentication details are missing." });
         const uid = req.user.uid;
         try {
@@ -108,7 +131,8 @@ try {
         }
     });
 
-    app.post("/getCharacterById", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    // FIX: Use fully qualified type for Express Response.
+    app.post("/getCharacterById", authMiddleware, async (req: AuthenticatedRequest, res: express.Response) => {
         if (!req.user) return res.status(403).json({ error: "Authentication details are missing." });
         const uid = req.user.uid;
         const { characterId } = req.body;
@@ -206,7 +230,8 @@ try {
         return { ...createdData, id: characterId };
     };
 
-    app.post("/createCharacterPair", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    // FIX: Use fully qualified type for Express Response.
+    app.post("/createCharacterPair", authMiddleware, async (req: AuthenticatedRequest, res: express.Response) => {
         if (!req.user) return res.status(403).json({ error: "Authentication details are missing." });
         const uid = req.user.uid;
         const { charABase64, charAMimeType, charBBase64, charBMimeType } = req.body;
@@ -227,7 +252,8 @@ try {
         }
     });
 
-    app.post("/generateCharacterVisualization", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    // FIX: Use fully qualified type for Express Response.
+    app.post("/generateCharacterVisualization", authMiddleware, async (req: AuthenticatedRequest, res: express.Response) => {
         if (!req.user) return res.status(403).json({ error: "Authentication details are missing." });
         const localAi = getAi();
         const uid = req.user.uid;
@@ -294,6 +320,7 @@ try {
     });
 
 } catch (error) {
-    console.error("CRITICAL: A fatal error occurred during application startup.", error);
-    (process as any).exit(1);
+    console.error("CRITICAL: A fatal error occurred during the initial application setup (pre-listen).", error);
+    // Exit cleanly if the core setup fails, this should now be very rare.
+    process.exit(1);
 }
