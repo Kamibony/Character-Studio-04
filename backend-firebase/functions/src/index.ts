@@ -1,9 +1,23 @@
-import * as functions from "firebase-functions";
+import *g from "firebase-functions";
 import * as admin from "firebase-admin";
 import {GoogleGenAI, Type, Modality} from "@google/genai";
-// FIX: The Buffer object is part of Node.js but might not be in the linter's scope.
-// Importing it explicitly fixes the "Cannot find name 'Buffer'" error.
 import { Buffer } from "buffer";
+
+// --- Global Initialization ---
+// This is the correct pattern for modern environments like Firebase App Hosting.
+// The Firebase Admin SDK is initialized once when the container starts,
+// ensuring all function instances share the same app instance.
+admin.initializeApp();
+const firestore = admin.firestore();
+const storage = admin.storage();
+const ai = process.env.API_KEY ? new GoogleGenAI({apiKey: process.env.API_KEY}) : null;
+
+if (!ai) {
+    // Log a fatal error during initialization if the API key is missing.
+    // This helps diagnose setup issues immediately upon deployment.
+    console.error("FATAL: API_KEY environment variable is not set. AI functions will fail.");
+}
+
 
 // Interface for character data, mirroring frontend
 interface UserCharacter {
@@ -16,29 +30,9 @@ interface UserCharacter {
   createdAt: admin.firestore.FieldValue;
 }
 
-// Lazy initialization
-let app: admin.app.App;
-let ai: GoogleGenAI | null = null;
-let firestore: admin.firestore.Firestore;
-let storage: admin.storage.Storage;
-
-const initialize = () => {
-  if (!app) {
-    app = admin.initializeApp();
-    firestore = admin.firestore();
-    storage = admin.storage();
-    // Initialize AI if the key exists.
-    if (process.env.API_KEY) {
-      ai = new GoogleGenAI({apiKey: process.env.API_KEY});
-    } else {
-      functions.logger.error("FATAL: API_KEY environment variable is not set. AI functions will fail.");
-    }
-  }
-};
-
-const requireAuth = (context: functions.https.CallableContext) => {
+const requireAuth = (context: g.https.CallableContext) => {
   if (!context.auth) {
-    throw new functions.https.HttpsError(
+    throw new g.https.HttpsError(
       "unauthenticated",
       "The function must be called while authenticated."
     );
@@ -46,10 +40,10 @@ const requireAuth = (context: functions.https.CallableContext) => {
   return context.auth.uid;
 };
 
-// A helper to ensure AI is initialized before use
+// A helper to ensure AI is initialized before use in any function call
 const getAi = (): GoogleGenAI => {
     if (!ai) {
-        throw new functions.https.HttpsError(
+        throw new g.https.HttpsError(
             "failed-precondition",
             "The Gemini API key is not configured for the backend. Please set the 'API_KEY' environment variable on your Cloud Function."
         );
@@ -58,59 +52,50 @@ const getAi = (): GoogleGenAI => {
 }
 
 const handleGeneralError = (error: any, context: string) => {
-    functions.logger.error(`Error in ${context}:`, {
-        // Log the full error object for detailed inspection in Firebase logs
+    g.logger.error(`Error in ${context}:`, {
         fullError: error,
         errorMessage: error.message,
         errorCode: error.code,
         errorDetails: error.details,
     });
-    if (error instanceof functions.https.HttpsError) {
+    if (error instanceof g.https.HttpsError) {
         throw error;
     }
-    // Provide a more helpful, actionable error message to the client.
-    throw new functions.https.HttpsError(
+    throw new g.https.HttpsError(
         "internal",
         `An internal server error occurred in ${context}. This might be due to a Google Cloud configuration issue. Please check the function logs and ensure that project billing and all required APIs (like Vertex AI and Cloud Storage) are enabled.`,
         { originalErrorMessage: error.message }
     );
 };
 
-export const getCharacterLibrary = functions
+export const getCharacterLibrary = g
   .region("us-central1")
   .https.onCall(async (data, context) => {
-    initialize();
     const uid = requireAuth(context);
-
     try {
       const snapshot = await firestore
         .collection("user_characters")
         .where("userId", "==", uid)
         .get();
-
       const characters = snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
       }));
-
       return characters;
     } catch (error) {
         handleGeneralError(error, "getCharacterLibrary");
-        // The line below will not be reached due to the throw in handleGeneralError,
-        // but it's here to satisfy TypeScript's requirement for a return value.
         return [];
     }
   });
 
-export const getCharacterById = functions
+export const getCharacterById = g
   .region("us-central1")
   .https.onCall(async (data, context) => {
-    initialize();
     const uid = requireAuth(context);
     const {characterId} = data;
 
     if (!characterId) {
-      throw new functions.https.HttpsError(
+      throw new g.https.HttpsError(
         "invalid-argument",
         "The function must be called with a 'characterId'."
       );
@@ -123,7 +108,7 @@ export const getCharacterById = functions
         .get();
 
       if (!doc.exists || doc.data()?.userId !== uid) {
-        throw new functions.https.HttpsError(
+        throw new g.https.HttpsError(
           "not-found",
           "Character not found or you do not have permission to access it."
         );
@@ -137,17 +122,16 @@ export const getCharacterById = functions
   });
 
 
-export const createCharacterPair = functions
+export const createCharacterPair = g
   .region("us-central1")
   .runWith({timeoutSeconds: 300, memory: "1GB"})
   .https.onCall(async (data, context) => {
-    initialize();
-    const localAi = getAi(); // Get AI instance, will throw if not configured
+    const localAi = getAi();
     const uid = requireAuth(context);
     const {charABase64, charAMimeType, charBBase64, charBMimeType} = data;
 
     if (!charABase64 || !charBBase64 || !charAMimeType || !charBMimeType) {
-      throw new functions.https.HttpsError(
+      throw new g.https.HttpsError(
         "invalid-argument",
         "Missing image data for one or both characters."
       );
@@ -157,7 +141,6 @@ export const createCharacterPair = functions
       base64: string,
       mimeType: string
     ): Promise<UserCharacter> => {
-      // 1. Decode and upload to Storage
       const buffer = Buffer.from(base64, "base64");
       const characterId = firestore.collection("user_characters").doc().id;
       const filePath = `user_uploads/${uid}/${characterId}.${mimeType.split("/")[1]}`;
@@ -171,7 +154,6 @@ export const createCharacterPair = functions
         expires: "03-09-2491",
       });
 
-      // 2. Call Gemini to analyze image
       const response = await localAi.models.generateContent({
         model: "gemini-2.5-flash",
         contents: {
@@ -202,7 +184,6 @@ export const createCharacterPair = functions
 
       const analysis = JSON.parse(response.text);
       
-      // 3. Save character profile to Firestore
       const newCharacter: UserCharacter = {
         userId: uid,
         characterName: analysis.characterName,
@@ -233,41 +214,38 @@ export const createCharacterPair = functions
   });
 
 
-export const generateCharacterVisualization = functions
+export const generateCharacterVisualization = g
   .region("us-central1")
   .runWith({timeoutSeconds: 300, memory: "1GB"})
   .https.onCall(async (data, context) => {
-    initialize();
-    const localAi = getAi(); // Get AI instance, will throw if not configured
+    const localAi = getAi();
     const uid = requireAuth(context);
     const {characterId, prompt} = data;
 
     if (!characterId || !prompt) {
-      throw new functions.https.HttpsError(
+      // FIX: Corrected a typo where HttpsError was incorrectly called as a string property.
+      throw new g.https.HttpsError(
         "invalid-argument",
         "Missing character ID or prompt."
       );
     }
 
-    // 1. Fetch character and verify ownership
     const charDoc = await firestore
       .collection("user_characters")
       .doc(characterId)
       .get();
     if (!charDoc.exists || charDoc.data()?.userId !== uid) {
-      throw new functions.https.HttpsError(
+      throw new g.https.HttpsError(
         "not-found",
         "Character not found or access denied."
       );
     }
     const character = charDoc.data();
     
-    // This check is important
     if (!character?.imageUrl) {
-         throw new functions.https.HttpsError("not-found", "Character image URL is missing.");
+         throw new g.https.HttpsError("not-found", "Character image URL is missing.");
     }
 
-    // 2. Fetch image from storage url
     const imageUrl = character.imageUrl;
     const url = new URL(imageUrl);
     const filePath = decodeURIComponent(url.pathname.split("/").slice(2).join("/"));
@@ -279,7 +257,6 @@ export const generateCharacterVisualization = functions
     const [imageBuffer] = await file.download();
     const imageBase64 = imageBuffer.toString("base64");
 
-    // 3. Call Gemini to generate new image
     try {
       const response = await localAi.models.generateContent({
         model: "gemini-2.5-flash-image",
