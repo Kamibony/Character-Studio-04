@@ -14,7 +14,7 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const functions = getFunctions(app, 'us-central1');
+const functions = getFunctions(app, 'europe-west4');
 const googleProvider = new GoogleAuthProvider();
 
 // Explicitly set persistence to localStorage. This is more reliable in
