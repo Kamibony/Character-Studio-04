@@ -1,0 +1,5 @@
+{
+  "name": "Character Studio",
+  "description": "A tool for creating and training character profiles from images using AI. These profiles can then be used to generate visualizations and will be the foundation for future comic generation.",
+  "requestFramePermissions": []
+}
