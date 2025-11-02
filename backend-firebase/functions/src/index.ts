@@ -1,6 +1,5 @@
 import * as express from "express";
 import * as cors from "cors";
-import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
 import {GoogleGenAI, Type, Modality} from "@google/genai";
 import { Buffer } from "buffer";
@@ -12,7 +11,7 @@ const storage = admin.storage();
 const ai = process.env.API_KEY ? new GoogleGenAI({apiKey: process.env.API_KEY}) : null;
 
 if (!ai) {
-    logger.error("FATAL: API_KEY environment variable is not set. AI functions will fail.");
+    console.error("FATAL: API_KEY environment variable is not set. AI functions will fail.");
 }
 
 const app = express();
@@ -35,7 +34,7 @@ const authMiddleware = async (req: any, res: express.Response, next: express.Nex
         req.user = decodedToken; // Attach user info to the request object
         next();
     } catch (error) {
-        logger.error('Error verifying auth token:', error);
+        console.error('Error verifying auth token:', error);
         return res.status(403).send({ error: 'Unauthorized: Invalid token.' });
     }
 };
@@ -74,7 +73,7 @@ app.post("/getCharacterLibrary", authMiddleware, async (req: any, res) => {
         }));
         res.status(200).json(characters);
     } catch (error) {
-        logger.error("Error in getCharacterLibrary:", error);
+        console.error("Error in getCharacterLibrary:", error);
         res.status(500).json({ error: "Internal server error." });
     }
 });
@@ -99,7 +98,7 @@ app.post("/getCharacterById", authMiddleware, async (req: any, res) => {
 
         res.status(200).json({ id: doc.id, ...doc.data() });
     } catch (error) {
-        logger.error("Error in getCharacterById:", error);
+        console.error("Error in getCharacterById:", error);
         res.status(500).json({ error: "Internal server error." });
     }
 });
@@ -189,7 +188,7 @@ app.post("/createCharacterPair", authMiddleware, async (req: any, res) => {
         ]);
         res.status(200).json({characterA: charA, characterB: charB});
     } catch (error: any) {
-        logger.error("Error in createCharacterPair:", error);
+        console.error("Error in createCharacterPair:", error);
         res.status(500).json({ error: "Internal server error.", details: error.message });
     }
 });
@@ -248,12 +247,12 @@ app.post("/generateCharacterVisualization", authMiddleware, async (req: any, res
             throw new Error("No image data returned from AI model.");
         }
     } catch (error: any) {
-        logger.error("Error in generateCharacterVisualization:", error);
+        console.error("Error in generateCharacterVisualization:", error);
         res.status(500).json({ error: "Internal server error.", details: error.message });
     }
 });
 
 // --- Start Server ---
 app.listen(port, () => {
-    logger.info(`Server listening on port ${port}`);
+    console.log(`Server listening on port ${port}`);
 });
