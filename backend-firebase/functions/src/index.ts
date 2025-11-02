@@ -1,4 +1,7 @@
-import *g from "firebase-functions";
+
+// FIX: Switched to Firebase Functions v2 imports for compatibility.
+import {onCall, HttpsError, CallableRequest} from "firebase-functions/v2/https";
+import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
 import {GoogleGenAI, Type, Modality} from "@google/genai";
 import { Buffer } from "buffer";
@@ -30,9 +33,11 @@ interface UserCharacter {
   createdAt: admin.firestore.FieldValue;
 }
 
-const requireAuth = (context: g.https.CallableContext) => {
+// FIX: Updated context type to CallableRequest for Firebase Functions v2.
+const requireAuth = (context: CallableRequest) => {
   if (!context.auth) {
-    throw new g.https.HttpsError(
+    // FIX: Use HttpsError from v2 import.
+    throw new HttpsError(
       "unauthenticated",
       "The function must be called while authenticated."
     );
@@ -43,7 +48,8 @@ const requireAuth = (context: g.https.CallableContext) => {
 // A helper to ensure AI is initialized before use in any function call
 const getAi = (): GoogleGenAI => {
     if (!ai) {
-        throw new g.https.HttpsError(
+        // FIX: Use HttpsError from v2 import.
+        throw new HttpsError(
             "failed-precondition",
             "The Gemini API key is not configured for the backend. Please set the 'API_KEY' environment variable on your Cloud Function."
         );
@@ -52,26 +58,28 @@ const getAi = (): GoogleGenAI => {
 }
 
 const handleGeneralError = (error: any, context: string) => {
-    g.logger.error(`Error in ${context}:`, {
+    // FIX: Use logger from v2 import.
+    logger.error(`Error in ${context}:`, {
         fullError: error,
         errorMessage: error.message,
         errorCode: error.code,
         errorDetails: error.details,
     });
-    if (error instanceof g.https.HttpsError) {
+    // FIX: Use HttpsError from v2 import.
+    if (error instanceof HttpsError) {
         throw error;
     }
-    throw new g.https.HttpsError(
+    // FIX: Use HttpsError from v2 import.
+    throw new HttpsError(
         "internal",
         `An internal server error occurred in ${context}. This might be due to a Google Cloud configuration issue. Please check the function logs and ensure that project billing and all required APIs (like Vertex AI and Cloud Storage) are enabled.`,
         { originalErrorMessage: error.message }
     );
 };
 
-export const getCharacterLibrary = g
-  .region("us-central1")
-  .https.onCall(async (data, context) => {
-    const uid = requireAuth(context);
+// FIX: Updated function definition to Firebase Functions v2 syntax.
+export const getCharacterLibrary = onCall({region: "us-central1"}, async (request) => {
+    const uid = requireAuth(request);
     try {
       const snapshot = await firestore
         .collection("user_characters")
@@ -88,14 +96,14 @@ export const getCharacterLibrary = g
     }
   });
 
-export const getCharacterById = g
-  .region("us-central1")
-  .https.onCall(async (data, context) => {
-    const uid = requireAuth(context);
-    const {characterId} = data;
+// FIX: Updated function definition to Firebase Functions v2 syntax.
+export const getCharacterById = onCall({region: "us-central1"}, async (request) => {
+    const uid = requireAuth(request);
+    const {characterId} = request.data;
 
     if (!characterId) {
-      throw new g.https.HttpsError(
+      // FIX: Use HttpsError from v2 import.
+      throw new HttpsError(
         "invalid-argument",
         "The function must be called with a 'characterId'."
       );
@@ -108,7 +116,8 @@ export const getCharacterById = g
         .get();
 
       if (!doc.exists || doc.data()?.userId !== uid) {
-        throw new g.https.HttpsError(
+        // FIX: Use HttpsError from v2 import.
+        throw new HttpsError(
           "not-found",
           "Character not found or you do not have permission to access it."
         );
@@ -122,16 +131,15 @@ export const getCharacterById = g
   });
 
 
-export const createCharacterPair = g
-  .region("us-central1")
-  .runWith({timeoutSeconds: 300, memory: "1GB"})
-  .https.onCall(async (data, context) => {
+// FIX: Updated function definition to Firebase Functions v2 syntax.
+export const createCharacterPair = onCall({region: "us-central1", timeoutSeconds: 300, memory: "1GiB"}, async (request) => {
     const localAi = getAi();
-    const uid = requireAuth(context);
-    const {charABase64, charAMimeType, charBBase64, charBMimeType} = data;
+    const uid = requireAuth(request);
+    const {charABase64, charAMimeType, charBBase64, charBMimeType} = request.data;
 
     if (!charABase64 || !charBBase64 || !charAMimeType || !charBMimeType) {
-      throw new g.https.HttpsError(
+      // FIX: Use HttpsError from v2 import.
+      throw new HttpsError(
         "invalid-argument",
         "Missing image data for one or both characters."
       );
@@ -214,17 +222,15 @@ export const createCharacterPair = g
   });
 
 
-export const generateCharacterVisualization = g
-  .region("us-central1")
-  .runWith({timeoutSeconds: 300, memory: "1GB"})
-  .https.onCall(async (data, context) => {
+// FIX: Updated function definition to Firebase Functions v2 syntax.
+export const generateCharacterVisualization = onCall({region: "us-central1", timeoutSeconds: 300, memory: "1GiB"}, async (request) => {
     const localAi = getAi();
-    const uid = requireAuth(context);
-    const {characterId, prompt} = data;
+    const uid = requireAuth(request);
+    const {characterId, prompt} = request.data;
 
     if (!characterId || !prompt) {
-      // FIX: Corrected a typo where HttpsError was incorrectly called as a string property.
-      throw new g.https.HttpsError(
+      // FIX: Use HttpsError from v2 import.
+      throw new HttpsError(
         "invalid-argument",
         "Missing character ID or prompt."
       );
@@ -235,7 +241,8 @@ export const generateCharacterVisualization = g
       .doc(characterId)
       .get();
     if (!charDoc.exists || charDoc.data()?.userId !== uid) {
-      throw new g.https.HttpsError(
+      // FIX: Use HttpsError from v2 import.
+      throw new HttpsError(
         "not-found",
         "Character not found or access denied."
       );
@@ -243,7 +250,8 @@ export const generateCharacterVisualization = g
     const character = charDoc.data();
     
     if (!character?.imageUrl) {
-         throw new g.https.HttpsError("not-found", "Character image URL is missing.");
+        // FIX: Use HttpsError from v2 import.
+         throw new HttpsError("not-found", "Character image URL is missing.");
     }
 
     const imageUrl = character.imageUrl;
