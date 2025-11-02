@@ -1,4 +1,3 @@
-
 // FIX: Switched to Firebase Functions v2 imports for compatibility.
 import {onCall, HttpsError, CallableRequest} from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
@@ -77,8 +76,8 @@ const handleGeneralError = (error: any, context: string) => {
     );
 };
 
-// FIX: Updated function definition to Firebase Functions v2 syntax.
-export const getCharacterLibrary = onCall({region: "us-central1"}, async (request) => {
+// FIX: Updated function definition to Firebase Functions v2 syntax and removed hardcoded region.
+export const getCharacterLibrary = onCall(async (request) => {
     const uid = requireAuth(request);
     try {
       const snapshot = await firestore
@@ -96,8 +95,8 @@ export const getCharacterLibrary = onCall({region: "us-central1"}, async (reques
     }
   });
 
-// FIX: Updated function definition to Firebase Functions v2 syntax.
-export const getCharacterById = onCall({region: "us-central1"}, async (request) => {
+// FIX: Updated function definition to Firebase Functions v2 syntax and removed hardcoded region.
+export const getCharacterById = onCall(async (request) => {
     const uid = requireAuth(request);
     const {characterId} = request.data;
 
@@ -131,8 +130,8 @@ export const getCharacterById = onCall({region: "us-central1"}, async (request) 
   });
 
 
-// FIX: Updated function definition to Firebase Functions v2 syntax.
-export const createCharacterPair = onCall({region: "us-central1", timeoutSeconds: 300, memory: "1GiB"}, async (request) => {
+// FIX: Updated function definition to Firebase Functions v2 syntax and removed hardcoded region.
+export const createCharacterPair = onCall({timeoutSeconds: 300, memory: "1GiB"}, async (request) => {
     const localAi = getAi();
     const uid = requireAuth(request);
     const {charABase64, charAMimeType, charBBase64, charBMimeType} = request.data;
@@ -222,8 +221,8 @@ export const createCharacterPair = onCall({region: "us-central1", timeoutSeconds
   });
 
 
-// FIX: Updated function definition to Firebase Functions v2 syntax.
-export const generateCharacterVisualization = onCall({region: "us-central1", timeoutSeconds: 300, memory: "1GiB"}, async (request) => {
+// FIX: Updated function definition to Firebase Functions v2 syntax and removed hardcoded region.
+export const generateCharacterVisualization = onCall({timeoutSeconds: 300, memory: "1GiB"}, async (request) => {
     const localAi = getAi();
     const uid = requireAuth(request);
     const {characterId, prompt} = request.data;
